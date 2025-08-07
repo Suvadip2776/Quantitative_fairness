@@ -35,7 +35,7 @@ def kendall_tau_distance(list1, list2):
     
     return distance
 
-from votekit.cleaning import remove_noncands
+from votekit.cleaning import remove_and_condense
 
 def sigma_IIA(profile, voting_rule):
     """
@@ -54,7 +54,7 @@ def sigma_IIA(profile, voting_rule):
 
     for candidate in profile.candidates:
         # compute profile without the candidate
-        profile_without_candidate = remove_noncands(profile, [candidate])
+        profile_without_candidate = remove_and_condense([candidate], profile)
         
         # Get rankings
         ranking_without_candidate = voting_rule(profile_without_candidate)
@@ -72,7 +72,7 @@ def sigma_IIA(profile, voting_rule):
 
 #Sigma_UF metric
 
-def sigma_UF(profile, voting_rule):
+def sigma_UM(profile, voting_rule):
     """
     Compute Unanimity Fairness (σUF) for a given voting rule and profile.
 
@@ -143,7 +143,9 @@ def sigma_UF(profile, voting_rule):
             # Update minimum ratio
             min_ratio = min(min_ratio, ratio)
 
-    return min_ratio
+            min_majority = min_ratio / (min_ratio + 1)
+
+    return (2/np.pi)*(np.arcsin(np.sqrt(2*min_majority)))
 
 
 
@@ -256,3 +258,113 @@ def sigma_UF_STV(profile,seats, voting_rule):
             min_ratio = min(min_ratio, ratio)
 
     return min_ratio
+
+#Functions made based on Votekit version 3.2.1
+from votekit.cleaning import remove_and_condense
+
+
+def sigma_IIA_test(profile, voting_rule):
+    """
+    Compute σIIA fairness score for a given voting rule and profile.
+
+    Args:
+        profile (PreferenceProfile): The input profile with ballots and candidates.
+        voting_rule (function): A function like Ranked_Borda(profile) or Ranked_Plurality(profile).
+    
+    Returns:
+        float: σIIA score between 0 and 1.
+    """
+    original_ranking = voting_rule(profile)
+    M = len(profile.candidates)
+    total_distance = 0
+
+    for candidate in profile.candidates:
+        # compute profile without the candidate
+        profile_without_candidate = remove_and_condense([candidate], profile)
+        
+        # Get rankings
+        ranking_without_candidate = voting_rule(profile_without_candidate)
+        original_ranking_without_candidate = [cand for cand in original_ranking if cand != candidate]
+        
+        # Compute Kendall Tau distance
+        distance = kendall_tau_distance(ranking_without_candidate, original_ranking_without_candidate)
+        
+        total_distance += distance
+
+    # Normalize and invert
+    sigma_iia = 1 - total_distance / ((M * (M-1)* (M-2)) / 2)
+
+    return sigma_iia
+
+#-------- WINNER SET RULES--------------
+import numpy as np
+#Below is winner set version for the UM Metric
+
+def sigma_UM_winner_set(profile, voting_rule, seats):
+    """
+    Compute the UM (unanimity majority) score for a voting rule that outputs a winner set of size equal to seats.
+
+    Args:
+        profile (PreferenceProfile): The voter profile.
+        voting_rule (callable): A function or class that takes (profile, seats) and returns an election object with get_elected().
+        seats (int): Number of winners to be selected.
+
+    Returns:
+        float: UM fairness score between 0 and 1.
+    """
+    #Run the voting rule to get the election result
+
+  
+    
+    election = voting_rule(profile , seats)
+    
+    #Extract winners from the election
+    #Handles tuple of frozensets like (frozenset({'A'}), frozenset({'B'}), ...)
+    winners_raw = election.get_elected()
+    winners = [next(iter(group)) for group in winners_raw]  # flatten frozensets
+    winners_set = set(winners)
+
+    #  Compute σ_UM based on winner vs loser support
+    candidates = profile.candidates
+    N = sum(ballot.weight for ballot in profile.ballots)
+
+    min_majority = 1.0 
+
+    for A in winners_set:
+        for B in candidates:
+            if B in winners_set or A == B:
+                continue  # Only compare A ∈ winners, B ∉ winners
+
+            A_over_B = 0
+
+            for ballot in profile.ballots:
+                weight = ballot.weight
+                if not ballot.ranking:
+                    continue
+
+                # Build rank map: {candidate: rank index}
+                ranks = {cand: idx for idx, group in enumerate(ballot.ranking) for cand in group}
+                A_in = A in ranks
+                B_in = B in ranks
+
+                if A_in and B_in:
+                    if ranks[A] < ranks[B]:
+                        A_over_B += weight
+                elif A_in and not B_in:
+                    A_over_B += weight
+                elif not A_in and not B_in:
+                    A_over_B += 0.5 * weight
+
+            support = A_over_B / N
+            min_majority = min(min_majority, support)
+
+    #  Apply the UM formula
+    #min_majority is the misalignment score
+    return 1.0 if min_majority >= 0.5 else (2/np.pi)*(np.arcsin(np.sqrt(2*min_majority)))
+
+
+
+#   Below is the code the Winner set version for IIA metric
+
+
+
