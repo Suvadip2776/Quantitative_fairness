@@ -70,18 +70,18 @@ def sigma_IIA(profile, voting_rule):
 
     return sigma_iia
 
-#Sigma_UF metric
+#Sigma_UM metric
 
 def sigma_UM(profile, voting_rule):
     """
-    Compute Unanimity Fairness (σUF) for a given voting rule and profile.
+    Compute Unanimity Fairness (σUM) for a given voting rule and profile.
 
     Args:
         profile (PreferenceProfile): The input profile with ballots and candidates.
         voting_rule (function): A function like Ranked_Borda(profile) or Ranked_Plurality(profile).
     
     Returns:
-        float: σUF score between 0 and 1.
+        float: σUM score between 0 and 1.
     """
     candidates = profile.candidates
     N = sum(ballot.weight for ballot in profile.ballots)  # Total voter weight
@@ -169,7 +169,7 @@ def sigma_IIA_STV(profile, seats, voting_rule):
 
     for candidate in profile.candidates:
         # compute profile without the candidate
-        profile_without_candidate = remove_noncands(profile, [candidate])
+        profile_without_candidate = remove_and_condense(profile, [candidate])
         
         # Get rankings
         ranking_without_candidate = voting_rule(profile_without_candidate,seats)
@@ -257,46 +257,65 @@ def sigma_UF_STV(profile,seats, voting_rule):
             # Update minimum ratio
             min_ratio = min(min_ratio, ratio)
 
-    return min_ratio
+            min_majority = min_ratio / (min_ratio + 1)
+
+    return (2/np.pi)*(np.arcsin(np.sqrt(2*min_majority))
+
+  
 
 #Functions made based on Votekit version 3.2.1
 from votekit.cleaning import remove_and_condense
 
 
-def sigma_IIA_test(profile, voting_rule):
+    return sigma_iia
+
+#-------- WINNER SET RULES--------------
+
+#IIA metric
+
+def sigma_IIA_winner(profile, voting_rule, seats):
     """
-    Compute σIIA fairness score for a given voting rule and profile.
+    Compute σIIA fairness score for a given voting rule and profile,
+    focusing on the winner set.
 
     Args:
         profile (PreferenceProfile): The input profile with ballots and candidates.
         voting_rule (function): A function like Ranked_Borda(profile) or Ranked_Plurality(profile).
+        seats (int): Number of winners to select.
     
     Returns:
         float: σIIA score between 0 and 1.
     """
-    original_ranking = voting_rule(profile)
-    M = len(profile.candidates)
+    winners = voting_rule(profile, m=seats, tiebreak = 'random').get_elected()
+    winner_set = set([next(iter(w)) for w in winners])  # assumes winners is a list of singleton sets/lists
+
+    M = len(winner_set)
     total_distance = 0
 
-    for candidate in profile.candidates:
-        # compute profile without the candidate
-        profile_without_candidate = remove_and_condense([candidate], profile)
-        
-        # Get rankings
-        ranking_without_candidate = voting_rule(profile_without_candidate)
-        original_ranking_without_candidate = [cand for cand in original_ranking if cand != candidate]
-        
-        # Compute Kendall Tau distance
-        distance = kendall_tau_distance(ranking_without_candidate, original_ranking_without_candidate)
-        
-        total_distance += distance
+    for cand in profile.candidates:
+        if cand in winner_set and M > 1:
+            winner_set_without_cand = winner_set - {cand}
 
-    # Normalize and invert
-    sigma_iia = 1 - total_distance / ((M * (M-1)* (M-2)) / 2)
+            new_profile = remove_and_condense([cand], profile)
+            new_winners = voting_rule(new_profile, m=seats - 1,tiebreak = 'random').get_elected()
+            new_winners_set = set([next(iter(w)) for w in new_winners])
 
-    return sigma_iia
+            
+            total_distance += len(winner_set_without_cand & new_winners_set) / (M - 1)
+            
+        else:
+            new_profile = remove_and_condense([cand], profile)
+            new_winners = voting_rule(new_profile, m=seats, tiebreak = 'random').get_elected()
+            new_winners_set = set([next(iter(w)) for w in new_winners])
 
-#-------- WINNER SET RULES--------------
+            total_distance += len(winner_set & new_winners_set) / M
+
+    return total_distance / len(profile.candidates)
+
+
+#UM netric
+
+
 import numpy as np
 #Below is winner set version for the UM Metric
 
@@ -364,7 +383,6 @@ def sigma_UM_winner_set(profile, voting_rule, seats):
 
 
 
-#   Below is the code the Winner set version for IIA metric
 
 
 
